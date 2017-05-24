@@ -13,12 +13,11 @@ import os
 import numpy as np
 
 from imdb import IMDB
-from tqdm import tqdm
+from pascal_voc_eval import voc_eval
 from ds_utils import unique_boxes, filter_small_boxes
-from joblib import Parallel, delayed
 
 
-class Seals(IMDB):
+class PascalVOC(IMDB):
     def __init__(self, image_set, root_path, devkit_path):
         """
         fill basic information to initialize imdb
@@ -27,16 +26,19 @@ class Seals(IMDB):
         :param devkit_path: data and results
         :return: imdb object
         """
-
-        super(Seals, self).__init__('seals', image_set, root_path, devkit_path)  # set self.name
-
+        year, image_set = image_set.split('_')
+        super(PascalVOC, self).__init__('voc_' + year, image_set, root_path, devkit_path)  # set self.name
+        self.year = year
         self.root_path = root_path
         self.devkit_path = devkit_path
-        self.data_path = devkit_path
+        self.data_path = os.path.join(devkit_path, 'VOC' + year)
 
         self.classes = ['__background__',  # always index 0
-                        'r', 'p', 'b', 'bl',
-                        'g']
+                        'aeroplane', 'bicycle', 'bird', 'boat',
+                        'bottle', 'bus', 'car', 'cat', 'chair',
+                        'cow', 'diningtable', 'dog', 'horse',
+                        'motorbike', 'person', 'pottedplant',
+                        'sheep', 'sofa', 'train', 'tvmonitor']
         self.num_classes = len(self.classes)
         self.image_set_index = self.load_image_set_index()
         self.num_images = len(self.image_set_index)
@@ -51,30 +53,21 @@ class Seals(IMDB):
         find out which indexes correspond to given image set (train or val)
         :return:
         """
-        if self.image_set == 'Train':
-            # image_set_index = os.listdir(os.path.join(self.data_path, 'Annottations'))
-            image_set_index = os.listdir(os.path.join(self.data_path, 'Annotations_patches'))
-            # image_set_index = map(lambda x: x.replace('.lif', '.jpg'), image_set_index)
-            image_set_index = map(lambda x: x.replace('.xml', '.jpg'), image_set_index)
-        else:
-            image_set_index = os.listdir(os.path.join(self.data_path, self.image_set))
-        #
-        # print(self.data_path, self.image_set)
-        # image_set_index_file = os.path.join(self.data_path, 'ImageSets', 'Main', self.image_set + '.txt')
-        # assert os.path.exists(image_set_index_file), 'Path does not exist: {}'.format(image_set_index_file)
-        # with open(image_set_index_file) as f:
-        #     image_set_index = [x.strip() for x in f.readlines()]
+        image_set_index_file = os.path.join(self.data_path, 'ImageSets', 'Main', self.image_set + '.txt')
+        assert os.path.exists(image_set_index_file), 'Path does not exist: {}'.format(image_set_index_file)
+        with open(image_set_index_file) as f:
+            image_set_index = [x.strip() for x in f.readlines()]
         return image_set_index
 
-    # def image_path_from_index(self, index):
-    #     """
-    #     given image index, find out full path
-    #     :param index: index of a specific image
-    #     :return: full path of this image
-    #     """
-    #     image_file = os.path.join(self.data_path, 'JPEGImages', index + '.jpg')
-    #     assert os.path.exists(image_file), 'Path does not exist: {}'.format(image_file)
-    #     return image_file
+    def image_path_from_index(self, index):
+        """
+        given image index, find out full path
+        :param index: index of a specific image
+        :return: full path of this image
+        """
+        image_file = os.path.join(self.data_path, 'JPEGImages', index + '.jpg')
+        assert os.path.exists(image_file), 'Path does not exist: {}'.format(image_file)
+        return image_file
 
     def gt_roidb(self):
         """
@@ -88,12 +81,7 @@ class Seals(IMDB):
             print('{} gt roidb loaded from {}'.format(self.name, cache_file))
             return roidb
 
-        gt_roidb = [self.load_pascal_annotation(index) for index in tqdm(self.image_set_index)]
-        #
-        # gt_roidb = Parallel(n_jobs=8)([delayed(self.load_pascal_annotation)(index) for index in self.image_set_index])
-
-
-
+        gt_roidb = [self.load_pascal_annotation(index) for index in self.image_set_index]
         with open(cache_file, 'wb') as fid:
             cPickle.dump(gt_roidb, fid, cPickle.HIGHEST_PROTOCOL)
         print('wrote gt roidb to {}'.format(cache_file))
@@ -108,53 +96,43 @@ class Seals(IMDB):
         """
         import xml.etree.ElementTree as ET
         roi_rec = dict()
+        roi_rec['image'] = self.image_path_from_index(index)
+        size = cv2.imread(roi_rec['image']).shape
+        roi_rec['height'] = size[0]
+        roi_rec['width'] = size[1]
 
-        roi_rec['image'] = os.path.join(self.data_path, self.image_set, index)
+        filename = os.path.join(self.data_path, 'Annotations', index + '.xml')
+        tree = ET.parse(filename)
+        objs = tree.findall('object')
+        if not self.config['use_diff']:
+            non_diff_objs = [obj for obj in objs if int(obj.find('difficult').text) == 0]
+            objs = non_diff_objs
+        num_objs = len(objs)
 
-        if self.image_set == 'train_patches':
-            size = cv2.imread(roi_rec['image']).shape
-            roi_rec['height'] = size[0]
-            roi_rec['width'] = size[1]
-            # filename = os.path.join(self.data_path, 'Annottations', index.replace('.jpg', '.lif'))
-            filename = os.path.join(self.data_path, 'Annotations_patches', index.replace('.jpg', '.xml'))
-            tree = ET.parse(filename)
-            objs = tree.findall('object')
-            if not self.config['use_diff']:
-                non_diff_objs = [obj for obj in objs if int(obj.find('difficult').text) == 0]
-                objs = non_diff_objs
-            num_objs = len(objs)
+        boxes = np.zeros((num_objs, 4), dtype=np.uint16)
+        gt_classes = np.zeros((num_objs), dtype=np.int32)
+        overlaps = np.zeros((num_objs, self.num_classes), dtype=np.float32)
 
-            boxes = np.zeros((num_objs, 4), dtype=np.uint16)
-            gt_classes = np.zeros(num_objs, dtype=np.int32)
-            overlaps = np.zeros((num_objs, self.num_classes), dtype=np.float32)
+        class_to_index = dict(zip(self.classes, range(self.num_classes)))
+        # Load object bounding boxes into a data frame.
+        for ix, obj in enumerate(objs):
+            bbox = obj.find('bndbox')
+            # Make pixel indexes 0-based
+            x1 = float(bbox.find('xmin').text) - 1
+            y1 = float(bbox.find('ymin').text) - 1
+            x2 = float(bbox.find('xmax').text) - 1
+            y2 = float(bbox.find('ymax').text) - 1
+            cls = class_to_index[obj.find('name').text.lower().strip()]
+            boxes[ix, :] = [x1, y1, x2, y2]
+            gt_classes[ix] = cls
+            overlaps[ix, cls] = 1.0
 
-            class_to_index = dict(zip(self.classes, range(self.num_classes)))
-            # Load object bounding boxes into a data frame.
-            for ix, obj in enumerate(objs):
-                bbox = obj.find('bndbox')
-                # Make pixel indexes 0-based
-                x1 = float(bbox.find('xmin').text) - 1
-                y1 = float(bbox.find('ymin').text) - 1
-                x2 = float(bbox.find('xmax').text) - 1
-                y2 = float(bbox.find('ymax').text) - 1
-                cls = class_to_index[obj.find('name').text.lower().strip()]
-                boxes[ix, :] = [x1, y1, x2, y2]
-                gt_classes[ix] = cls
-                overlaps[ix, cls] = 1.0
-
-            roi_rec.update({'boxes': boxes,
-                            'gt_classes': gt_classes,
-                            'gt_overlaps': overlaps,
-                            'max_classes': overlaps.argmax(axis=1),
-                            'max_overlaps': overlaps.max(axis=1),
-                            'flipped': False})
-        else:
-            roi_rec['height'] = 1000
-            roi_rec['width'] = 1000
-
-            boxes = np.zeros((1, 4), dtype=np.uint8)
-            roi_rec.update({'boxes': boxes,
-                            'flipped': False})
+        roi_rec.update({'boxes': boxes,
+                        'gt_classes': gt_classes,
+                        'gt_overlaps': overlaps,
+                        'max_classes': overlaps.argmax(axis=1),
+                        'max_overlaps': overlaps.max(axis=1),
+                        'flipped': False})
         return roi_rec
 
     def load_selective_search_roidb(self, gt_roidb):
@@ -215,13 +193,15 @@ class Seals(IMDB):
         result_dir = os.path.join(self.devkit_path, 'results')
         if not os.path.exists(result_dir):
             os.mkdir(result_dir)
-
-        res_file_folder = os.path.join(self.devkit_path, 'results')
+        year_folder = os.path.join(self.devkit_path, 'results', 'VOC' + self.year)
+        if not os.path.exists(year_folder):
+            os.mkdir(year_folder)
+        res_file_folder = os.path.join(self.devkit_path, 'results', 'VOC' + self.year, 'Main')
         if not os.path.exists(res_file_folder):
             os.mkdir(res_file_folder)
 
         self.write_pascal_results(detections)
-        # self.do_python_eval()
+        self.do_python_eval()
 
     def get_result_file_template(self):
         """
@@ -229,7 +209,7 @@ class Seals(IMDB):
         VOCdevkit/results/VOC2007/Main/<comp_id>_det_test_aeroplane.txt
         :return: a string template
         """
-        res_file_folder = os.path.join(self.devkit_path, 'results')
+        res_file_folder = os.path.join(self.devkit_path, 'results', 'VOC' + self.year, 'Main')
         comp_id = self.config['comp_id']
         filename = comp_id + '_det_' + self.image_set + '_{:s}.txt'
         path = os.path.join(res_file_folder, filename)
@@ -257,22 +237,24 @@ class Seals(IMDB):
                                 format(index, dets[k, -1],
                                        dets[k, 0] + 1, dets[k, 1] + 1, dets[k, 2] + 1, dets[k, 3] + 1))
 
-    # def do_python_eval(self):
-    #     """
-    #     python evaluation wrapper
-    #     :return: None
-    #     """
-    #     annopath = os.path.join(self.data_path, 'Annotations', '{0!s}.xml')
-    #     imageset_file = os.path.join(self.data_path, 'ImageSets', 'Main', self.image_set + '.txt')
-    #     annocache = os.path.join(self.cache_path, self.name + '_annotations.pkl')
-    #     aps = []
-    #     # The PASCAL VOC metric changed in 2010
-    #             for cls_ind, cls in enumerate(self.classes):
-    #         if cls == '__background__':
-    #             continue
-    #         filename = self.get_result_file_template().format(cls)
-    #         rec, prec, ap = voc_eval(filename, annopath, imageset_file, cls, annocache,
-    #                                  ovthresh=0.5, use_07_metric=use_07_metric)
-    #         aps += [ap]
-    #         print('AP for {} = {:.4f}'.format(cls, ap))
-    #     print('Mean AP = {:.4f}'.format(np.mean(aps)))
+    def do_python_eval(self):
+        """
+        python evaluation wrapper
+        :return: None
+        """
+        annopath = os.path.join(self.data_path, 'Annotations', '{0!s}.xml')
+        imageset_file = os.path.join(self.data_path, 'ImageSets', 'Main', self.image_set + '.txt')
+        annocache = os.path.join(self.cache_path, self.name + '_annotations.pkl')
+        aps = []
+        # The PASCAL VOC metric changed in 2010
+        use_07_metric = True if int(self.year) < 2010 else False
+        print('VOC07 metric? ' + ('Y' if use_07_metric else 'No'))
+        for cls_ind, cls in enumerate(self.classes):
+            if cls == '__background__':
+                continue
+            filename = self.get_result_file_template().format(cls)
+            rec, prec, ap = voc_eval(filename, annopath, imageset_file, cls, annocache,
+                                     ovthresh=0.5, use_07_metric=use_07_metric)
+            aps += [ap]
+            print('AP for {} = {:.4f}'.format(cls, ap))
+        print('Mean AP = {:.4f}'.format(np.mean(aps)))
