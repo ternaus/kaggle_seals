@@ -1,8 +1,9 @@
+import augmentation
 import numpy as np
 import cv2
 import os
-from ..config import config
 import random
+from ..config import config
 
 
 def get_image(roidb):
@@ -18,28 +19,48 @@ def get_image(roidb):
     num_images = len(roidb)
     processed_ims = []
     processed_roidb = []
-    for i in range(num_images):
+    k = 0
+    while len(processed_ims) != num_images:
+        k += 1
+        if k == num_images + 1:
+            # break # uncomment if it is not necessary to process all images
+            print("Batch generator. Process random image from list")
+        i = len(processed_ims) if k <= num_images else np.random.randint(num_images)
         roi_rec = roidb[i]
         assert os.path.exists(roi_rec['image']), '%s does not exist'.format(roi_rec['image'])
         im = cv2.imread(roi_rec['image'])
-
         if roidb[i]['flipped']:
             im = im[:, ::-1, :]
-
         new_rec = roi_rec.copy()
-        im_scale = 1.0
 
-        im_tensor = transform(im, config.PIXEL_MEANS)
-        im_info = [im_tensor.shape[2], im_tensor.shape[3], im_scale]
+        aug = augmentation.Augmentation(im, new_rec["boxes"], config.AUGMENTATION.PARAMS)
+        im_aug, boxes_aug, boxes_flag, augmented = aug.compute(config.AUGMENTATION.N_ATTEMPTS)
 
-        boxes = roi_rec['boxes'].copy() * im_scale
+        if augmented:
+            im = np.copy(im_aug)
+            new_rec = roi_rec_correct(new_rec, boxes_flag, boxes_aug)
 
-        new_rec['boxes'] = boxes
-        new_rec['im_info'] = im_info
+            scale_ind = random.randrange(len(config.SCALES))
+            target_size = config.SCALES[scale_ind][0]
+            max_size = config.SCALES[scale_ind][1]
+            im, im_scale = resize(im, target_size, max_size, stride=config.IMAGE_STRIDE)
+            im_tensor = transform(im, config.PIXEL_MEANS)
+            processed_ims.append(im_tensor)
+            im_info = [im_tensor.shape[2], im_tensor.shape[3], im_scale]
+            new_rec['boxes'] = new_rec['boxes'].copy() * im_scale
+            new_rec['im_info'] = im_info
+            processed_roidb.append(new_rec)
 
-        processed_ims.append(im_tensor)
-        processed_roidb.append(new_rec)
     return processed_ims, processed_roidb
+
+
+def roi_rec_correct(roi_rec, flags, boxes):
+    new_roi_rec = roi_rec.copy()
+    for i in ["gt_classes", "gt_overlaps", "max_classes", "max_overlaps"]:
+        new_roi_rec[i] = np.copy(new_roi_rec[i][np.where(flags)])
+    new_roi_rec["boxes"] = np.copy(np.array(boxes)[np.where(flags)])
+
+    return new_roi_rec
 
 
 def resize(im, target_size, max_size, stride=0):
@@ -142,4 +163,3 @@ def tensor_vstack(tensor_list, pad=0):
     else:
         raise Exception('Sorry, unimplemented.')
     return all_tensor
-
