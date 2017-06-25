@@ -15,7 +15,7 @@ import numpy as np
 from imdb import IMDB
 from tqdm import tqdm
 from ds_utils import unique_boxes, filter_small_boxes
-from joblib import Parallel, delayed
+import datetime
 
 
 class Seals(IMDB):
@@ -27,6 +27,9 @@ class Seals(IMDB):
         :param devkit_path: data and results
         :return: imdb object
         """
+
+        now = datetime.datetime.now()
+        # suffix = str(now.strftime("%Y-%m-%d-%H-%M"))
 
         super(Seals, self).__init__('seals', image_set, root_path, devkit_path)  # set self.name
 
@@ -45,6 +48,7 @@ class Seals(IMDB):
         self.config = {'comp_id': 'comp4',
                        'use_diff': False,
                        'min_size': 2}
+        print(self.config)
 
     def load_image_set_index(self):
         """
@@ -112,9 +116,13 @@ class Seals(IMDB):
         roi_rec['image'] = os.path.join(self.data_path, self.image_set, index)
 
         if self.image_set == 'train_patches':
+            # size = cv2.imread(roi_rec['image']).shape
+            # roi_rec['height'] = size[0]
+            # roi_rec['width'] = size[1]
+
             size = cv2.imread(roi_rec['image']).shape
-            roi_rec['height'] = size[0]
-            roi_rec['width'] = size[1]
+            roi_rec['height'] = 1000
+            roi_rec['width'] = 1000
             # filename = os.path.join(self.data_path, 'Annottations', index.replace('.jpg', '.lif'))
             filename = os.path.join(self.data_path, 'Annotations_patches', index.replace('.jpg', '.xml'))
             tree = ET.parse(filename)

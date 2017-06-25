@@ -28,7 +28,6 @@ class Augmentation:
 
     def transform_point(self, M, x, y):
         x, y = M[0, 0] * x + M[0, 1] * y + M[0, 2], M[1, 0] * x + M[1, 1] * y + M[1, 2]
-
         return x, y
 
     def transform_box(self, M, box):
@@ -41,35 +40,40 @@ class Augmentation:
     def geom(self):
         rows, cols = self.img.shape[:2]
         # angle = self.choose_random(self.params["angle"])
-        angle = np.random.choice([0, 90, 180, 270])
+        # angle = np.random.choice([0, 90, 180, 270])
 
         # angle = angle if np.random.choice([0, 1], p=[1 - self.params["geom_prob"], self.params["geom_prob"]]) else 0
 
-        M_rotation = cv2.getRotationMatrix2D((cols / 2, rows / 2), angle, 1)
+        # M_rotation = cv2.getRotationMatrix2D((cols / 2, rows / 2), angle, 1)
 
-        shear = [self.choose_random(self.params["shear"]) for _ in range(2)]
-        shear = [i if np.random.choice([0, 1], p=[1 - self.params["geom_prob"], self.params["geom_prob"]])
-                 else 0 for i in shear]
-        M_shear = [[1, shear[0], - shear[1] * rows / 2],
-                   [shear[1], 1, - shear[0] * cols / 2]]
+        # shear = [self.choose_random(self.params["shear"]) for _ in range(2)]
+        # shear = [i if np.random.choice([0, 1], p=[1 - self.params["geom_prob"], self.params["geom_prob"]])
+        #          else 0 for i in shear]
+        # M_shear = [[1, shear[0], - shear[1] * rows / 2],
+        #            [shear[1], 1, - shear[0] * cols / 2]]
 
         scale = [self.choose_random(self.params["scale"]) for _ in range(2)]
         scale = [i if np.random.choice([0, 1], p=[1 - self.params["geom_prob"], self.params["geom_prob"]])
                  else 1 for i in scale]
+
         M_scale = [[scale[0], 0, 0],
                    [0, scale[1], 0]]
 
         flip_h = self.params["flip_h"] \
             if np.random.choice([0, 1], p=[1 - self.params["geom_prob"], self.params["geom_prob"]]) else 0
+
         M_flip_h = [[1, 0, 0],
                     [0, -1 if flip_h else 1, rows if flip_h else 0]]
 
         flip_v = self.params["flip_v"] \
             if np.random.choice([0, 1], p=[1 - self.params["geom_prob"], self.params["geom_prob"]]) else 0
+
         M_flip_v = [[-1 if flip_v else 1, 0, cols if flip_v else 0],
                     [0, 1, 0]]
 
-        M = [np.vstack([i, [0, 0, 1]]) for i in [M_rotation, M_shear, M_scale, M_flip_h, M_flip_v]]
+        # M = [np.vstack([i, [0, 0, 1]]) for i in [M_rotation, M_shear, M_scale, M_flip_h, M_flip_v]]
+        M = [np.vstack([i, [0, 0, 1]]) for i in [M_scale, M_flip_h, M_flip_v]]
+
         M = reduce(np.dot, M)[:2]
 
         self.boxes = [self.transform_box(M, box) for box in self.boxes]
