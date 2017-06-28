@@ -236,7 +236,7 @@ dataset.Seals.dataset = 'Seals'
 # dataset.Seals.image_set = 'Train'
 dataset.Seals.image_set = 'train_patches'
 
-dataset.Seals.test_image_set = 'test_patches0'
+dataset.Seals.test_image_set = 'test_patches_s1'
 dataset.Seals.root_path = '../data'
 dataset.Seals.dataset_path = dataset.Seals.root_path
 dataset.Seals.NUM_CLASSES = 6

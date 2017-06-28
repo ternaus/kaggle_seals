@@ -28,6 +28,7 @@ fill_color = [0, 0, 0]
 
 struct_el = generate_binary_structure(2, 2)
 
+
 def add_mask(file_name):
     if file_name in missmatched:
         return
